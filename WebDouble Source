@@ -1,0 +1,131 @@
+import os
+import subprocess
+import sys
+import requests
+import customtkinter as ctk
+from bs4 import BeautifulSoup
+from urllib.parse import urljoin, urlparse
+from tkinter import filedialog
+
+def install_requirements():
+    required = ["requests", "beautifulsoup4", "customtkinter"]
+    for package in required:
+        subprocess.run([sys.executable, "-m", "pip", "install", package], check=True)
+
+install_requirements()
+
+ctk.set_appearance_mode("dark")
+ctk.set_default_color_theme("blue")
+
+app = ctk.CTk()
+app.geometry("600x500")
+app.title("Website Copier")
+
+settings = {"language": "English", "theme": "Dark"}
+
+def change_language():
+    settings["language"] = "" if settings["language"] == "English" else "English"
+    lang_btn.configure(text=f"Language: {settings['language']}")
+
+def toggle_theme():
+    settings["theme"] = "Light" if settings["theme"] == "Dark" else "Dark"
+    ctk.set_appearance_mode(settings["theme"].lower())
+    theme_btn.configure(text=f"Theme: {settings['theme']}")
+
+def browse_folder():
+    folder_selected = filedialog.askdirectory()
+    if folder_selected:
+        entry_path.delete(0, "end")
+        entry_path.insert(0, folder_selected)
+
+def download_file(url, folder):
+    try:
+        response = requests.get(url, stream=True)
+        response.raise_for_status()
+        filename = os.path.join(folder, os.path.basename(urlparse(url).path))
+        
+        if not filename:
+            return None
+        
+        with open(filename, 'wb') as file:
+            for chunk in response.iter_content(1024):
+                file.write(chunk)
+        return filename
+    except Exception as e:
+        print(f"Failed to download {url}: {e}")
+        return None
+
+def save_website():
+    url = entry_url.get()
+    save_path = entry_path.get()
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+    
+    response = requests.get(url)
+    if response.status_code != 200:
+        print("Failed to fetch website.")
+        return
+    
+    soup = BeautifulSoup(response.text, 'html.parser')
+
+    html_path = os.path.join(save_path, "index.html")
+    with open(html_path, "w", encoding="utf-8") as file:
+        file.write(soup.prettify())
+    
+    assets_folder = os.path.join(save_path, "assets")
+    os.makedirs(assets_folder, exist_ok=True)
+    
+    for tag in soup.find_all(['link', 'script', 'img']):
+        src = tag.get('href') or tag.get('src')
+        if src and not src.startswith(('http', 'data')):
+            full_url = urljoin(url, src)
+            filename = download_file(full_url, assets_folder)
+            if filename:
+                tag['href' if tag.name == 'link' else 'src'] = os.path.join("assets", os.path.basename(filename))
+    
+    # Save updated HTML with local asset links
+    with open(html_path, "w", encoding="utf-8") as file:
+        file.write(str(soup))
+    
+    print("Website copied successfully.")
+
+main_frame = ctk.CTkFrame(app)
+main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+ctk.CTkLabel(main_frame, text="Enter Website URL:", font=("Arial", 14)).pack(anchor="w", pady=5)
+entry_url = ctk.CTkEntry(main_frame, width=500)
+entry_url.pack(pady=5)
+
+ctk.CTkLabel(main_frame, text="Save Path:", font=("Arial", 14)).pack(anchor="w", pady=5)
+path_frame = ctk.CTkFrame(main_frame)
+path_frame.pack(fill="x", pady=5)
+entry_path = ctk.CTkEntry(path_frame, width=400)
+entry_path.pack(side="left", padx=5, expand=True)
+browse_btn = ctk.CTkButton(path_frame, text="Browse", command=browse_folder)
+browse_btn.pack(side="right")
+
+btn_download = ctk.CTkButton(main_frame, text="Download Website", command=save_website)
+btn_download.pack(pady=20)
+
+settings_frame = ctk.CTkFrame(app)
+settings_frame.pack_forget()
+
+ctk.CTkLabel(settings_frame, text="Settings", font=("Arial", 16, "bold")).pack(pady=10)
+lang_btn = ctk.CTkButton(settings_frame, text=f"Language: {settings['language']}", command=change_language)
+lang_btn.pack(pady=10)
+
+theme_btn = ctk.CTkButton(settings_frame, text=f"Theme: {settings['theme']}", command=toggle_theme)
+theme_btn.pack(pady=10)
+
+back_btn = ctk.CTkButton(settings_frame, text="Back", command=lambda: switch_tab(main_frame))
+back_btn.pack(pady=10)
+
+def switch_tab(frame):
+    main_frame.pack_forget()
+    settings_frame.pack_forget()
+    frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+settings_btn = ctk.CTkButton(app, text="Settings", command=lambda: switch_tab(settings_frame))
+settings_btn.pack(side="bottom", pady=10)
+
+app.mainloop()
